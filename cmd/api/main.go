@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 
+	"github.com/billalhossainjoy/openparadox/internal/config"
 	"github.com/billalhossainjoy/openparadox/internal/handler"
 	"github.com/billalhossainjoy/openparadox/internal/middleware"
 	"github.com/billalhossainjoy/openparadox/internal/repository"
@@ -11,15 +12,35 @@ import (
 
 
 func main() {
+	cfg :=config.Load()
+
 	repo:= repository.NewMemoryUserRepository()
 	service:= service.NewUserService(repo)
-	handler:= handler.NewUserHandler(service)
+	userHandler:= handler.NewUserHandler(service)
+	healthHandler:= handler.NewHealthHandler()
 
 	mux:= http.NewServeMux()
-	loggedMux:= middleware.Logging(mux)
-	mux.HandleFunc("POST /users", handler.CreateUser)
-	mux.HandleFunc("GET /users", handler.GetUsers)
-	mux.HandleFunc("GET /user/{id}", handler.GetUser)
 
-	http.ListenAndServe(":8080", loggedMux)
+
+
+
+	app:= middleware.Chain(
+		mux,
+		middleware.Recover,
+		middleware.RequestId,
+		middleware.Logging,
+		middleware.RequestTimeout(cfg.ReqTimeout),
+	)
+
+
+	// Health Routes
+	mux.HandleFunc("GET /healthz", healthHandler.Healthz)
+	mux.HandleFunc("GET /readyz", healthHandler.Readyz)
+
+	// User Routes
+	mux.HandleFunc("POST /users", userHandler.CreateUser)
+	mux.HandleFunc("GET /users", userHandler.GetUsers)
+	mux.HandleFunc("GET /user/{id}", userHandler.GetUser)
+
+	http.ListenAndServe(":8080", app)
 }
