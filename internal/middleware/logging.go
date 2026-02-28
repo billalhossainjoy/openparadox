@@ -14,7 +14,8 @@ func Logging(next http.Handler) http.Handler{
 
 		reqId:= GetRequestId(r.Context())
 
-		log.Printf("%s %s %v",
+		log.Printf("rid=%s method=%s path=%s dur=%s",
+		reqId,
 		r.Method,
 		r.URL.Path,
 		time.Since(start),

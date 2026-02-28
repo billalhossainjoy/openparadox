@@ -20,10 +20,6 @@ func main() {
 	healthHandler:= handler.NewHealthHandler()
 
 	mux:= http.NewServeMux()
-
-
-
-
 	app:= middleware.Chain(
 		mux,
 		middleware.Recover,
