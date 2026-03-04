@@ -1,42 +1,61 @@
 package main
 
 import (
+	"context"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/billalhossainjoy/openparadox/internal/app"
 	"github.com/billalhossainjoy/openparadox/internal/config"
-	"github.com/billalhossainjoy/openparadox/internal/handler"
-	"github.com/billalhossainjoy/openparadox/internal/middleware"
-	"github.com/billalhossainjoy/openparadox/internal/repository"
-	"github.com/billalhossainjoy/openparadox/internal/service"
 )
 
-
 func main() {
-	cfg :=config.Load()
+	cfg := config.Load()
+	handler := app.New(app.Deps{ReqTimeout: cfg.ReqTimeout})
 
-	repo:= repository.NewMemoryUserRepository()
-	service:= service.NewUserService(repo)
-	userHandler:= handler.NewUserHandler(service)
-	healthHandler:= handler.NewHealthHandler()
+	srv := &http.Server{
+		Addr:         cfg.Addr,
+		Handler:      handler,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
+	}
 
-	mux:= http.NewServeMux()
-	app:= middleware.Chain(
-		mux,
-		middleware.Recover,
-		middleware.RequestId,
-		middleware.Logging,
-		middleware.RequestTimeout(cfg.ReqTimeout),
-	)
+	// start server in a gorutine
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("listening on %s", cfg.Addr)
+		errCh <- srv.ListenAndServe()
+	}()
 
+	// wait for CTRL+C
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	// Health Routes
-	mux.HandleFunc("GET /healthz", healthHandler.Healthz)
-	mux.HandleFunc("GET /readyz", healthHandler.Readyz)
+	select {
+	case sig := <-stop:
+		log.Printf("received signal: %s, shutting down...", sig)
+	case err := <-errCh:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}
 
-	// User Routes
-	mux.HandleFunc("POST /users", userHandler.CreateUser)
-	mux.HandleFunc("GET /users", userHandler.GetUsers)
-	mux.HandleFunc("GET /user/{id}", userHandler.GetUser)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancel()
 
-	http.ListenAndServe(":8080", app)
+	log.Printf("Shutting down...")
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server shutdown error: %v", err)
+	}
+
+	_ = srv.Close()
+
+	time.Sleep(50 * time.Millisecond)
+	log.Printf("Bye")
+
 }
